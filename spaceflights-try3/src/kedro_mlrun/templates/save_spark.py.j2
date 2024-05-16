@@ -1,0 +1,149 @@
+# (c) McKinsey & Company 2016 – Present
+# All rights reserved
+#
+#
+# This material is intended solely for your internal use and may not be reproduced,
+# disclosed or distributed without McKinsey & Company's express prior written consent.
+# Except as otherwise stated, the Deliverables are provided ‘as is’, without any express
+# or implied warranty, and McKinsey shall not be obligated to maintain, support, host,
+# update, or correct the Deliverables. Client guarantees that McKinsey’s use of
+# information provided by Client as authorised herein will not violate any law
+# or contractual right of a third party. Client is responsible for the operation
+# and security of its operating environment. Client is responsible for performing final
+# testing (including security testing and assessment) of the code, model validation,
+# and final implementation of any model in a production environment. McKinsey is not
+# liable for modifications made to Deliverables by anyone other than McKinsey
+# personnel, (ii) for use of any Deliverables in a live production environment or
+# (iii) for use of the Deliverables by third parties; or
+# (iv) the use of the Deliverables for a purpose other than the intended use
+# case covered by the agreement with the Client.
+# Client warrants that it will not use the Deliverables in a "closed-loop" system,
+# including where no Client employee or agent is materially involved in implementing
+# the Deliverables and/or insights derived from the Deliverables.
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import mlrun
+from git import InvalidGitRepositoryError, Repo
+from kedro.framework.startup import bootstrap_project
+
+if TYPE_CHECKING:
+    from mlrun.projects import MlrunProject
+    from mlrun.runtimes import Spark3Runtime
+
+kedro_metadata = bootstrap_project(Path(__file__).parent.parent)
+
+mlrun.set_env_from_file(str(kedro_metadata.project_path / ".mlrun" / "mlrun.env"))
+project: MlrunProject = mlrun.get_or_create_project(
+    name=re.sub(r"[^-a-z0-9]", "", kedro_metadata.project_name.lower()),
+    context="./",
+    user_project=True,
+)
+
+
+try:
+    repo = Repo(".", search_parent_directories=True)
+except InvalidGitRepositoryError as e:
+    raise FileNotFoundError(
+        "kedro-mlrun must be executed within a git repository."
+    ) from e
+
+remotes = repo.remotes
+if len(remotes) == 0:
+    raise ValueError(
+        "The git repository does not have any remotes configured. "
+        "It must have at least one"
+    )
+elif len(remotes) > 1:
+    print(
+        "The git repository has multiple remotes configured. "
+        f"The first one will be used: {remotes[0].url}"
+    )
+
+source = remotes[0].url
+if source.startswith("https://"):
+    # mlrun only recognizes git://
+    source = source.replace("https://", "git://")
+elif "@" in source:
+    # assuming ssh-style url
+    _user, uri = source.split("@")
+    uri = uri.replace(":", "/")
+    source = f"git://{uri}"
+
+project.set_source(f"{source}#{repo.active_branch.name}", pull_at_runtime=True)
+project.set_secrets({"GIT_TOKEN": os.getenv("GIT_TOKEN")})
+
+# if necessary, register custom Spark packagers
+project.add_custom_packager(
+    "kedro_mlrun.packager.SparkSqlDFPackager", is_mandatory=False
+)
+project.add_custom_packager(
+    "kedro_mlrun.packager.SparkSqlDFAsPandasPackager", is_mandatory=False
+)
+
+fn_name = "kedro_handler_spark"
+spark_job: Spark3Runtime = mlrun.new_function(
+    command=".mlrun/kedro_handler_spark.py",
+    name=fn_name,
+    kind="spark",
+    requirements="src/requirements.txt",
+    # note that we do not specify an image here
+    # MLRun uses an appropriate image based on the Spark version in the cluster
+)
+
+# we set the source again for the function, for 2 reasons:
+# 1. spark jobs only allow pull_at_runtime=False
+# 2. we want to use a non-default target dir (see known_issues.md)
+spark_job.with_source_archive(
+    source=project.source, pull_at_runtime=False, target_dir="/my-source-dir"
+)
+
+# the extra command below is run in the builder, after the source is fetched
+# the source directory is read-only for spark jobs (fix pending)
+# however, at runtime, some JARs are auto-added to the working directory by MLRun
+# to be able to add them, we set working directory to a writable directory
+spark_job.spec.build.extra = "WORKDIR /igz"
+
+# if necessary, limits and requests can be set for Spark driver and executors
+# sj.with_driver_limits(cpu="1300m")
+# sj.with_driver_requests(cpu=1, mem="512m")
+# sj.with_executor_limits(cpu="1400m")
+# sj.with_executor_requests(cpu=1, mem="512m")
+
+# Number of executors
+spark_job.spec.replicas = 1
+
+# necessary to be able to read/write from V3IO
+# adds fuse, daemon & iguazio's jars support
+spark_job.with_igz_spark()
+
+# for debugging:
+# turn off auto-deletion of pods to be able to check pod logs
+# sj.spec.spark_conf["spark.kubernetes.driver.deleteOnTermination"] = False
+# sj.spec.spark_conf["spark.kubernetes.executor.deleteOnTermination"] = False
+
+# declare any added jars
+# these have to be in the image, or in a volume mounted to the driver and executors
+# sj.spec.deps["jars"] += ["local:///<path to jar>"]
+
+spark_job.deploy(
+    # git token is injected to the job from project secrets but not to the builder!
+    builder_env={"GIT_TOKEN": os.environ.get("GIT_TOKEN")},
+    # the default spark images do not have mlrun installed
+    # we depend on mlrun to log artifacts
+    # the command auto-installs the appropriate mlrun version as part of requirements
+    # by default, mlrun[complete] is installed
+    # can specify exact version/extras with
+    # mlrun_version_specifier="mlrun==1.5.1",
+    with_mlrun=True,
+)
+
+
+spark_job.save()
+project.set_function(spark_job)
+project.save()
+project.run_function(fn_name)

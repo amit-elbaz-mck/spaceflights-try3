@@ -1,0 +1,21 @@
+import mlrun
+import subprocess
+import os
+
+def run_extras(project: mlrun.projects.MlrunProject, run_build:bool):
+    """Extra commands to add to the project setup after it's created"""
+    
+    # Add build commands to the 'kedro-handler' function (as list of str)
+    build_commands = []
+    
+    # Add custom packagers to the project
+    # project.add_custom_packager("<packager-name>", is_mandatory=False)
+    
+    # Set additional functions/workflows
+
+    # Build the additional functions
+    if run_build:
+        pass
+   
+    
+    return project, build_commands

@@ -1,0 +1,47 @@
+# (c) McKinsey & Company 2016 – Present
+# All rights reserved
+#
+#
+# This material is intended solely for your internal use and may not be reproduced,
+# disclosed or distributed without McKinsey & Company's express prior written consent.
+# Except as otherwise stated, the Deliverables are provided ‘as is’, without any express
+# or implied warranty, and McKinsey shall not be obligated to maintain, support, host,
+# update, or correct the Deliverables. Client guarantees that McKinsey’s use of
+# information provided by Client as authorised herein will not violate any law
+# or contractual right of a third party. Client is responsible for the operation
+# and security of its operating environment. Client is responsible for performing final
+# testing (including security testing and assessment) of the code, model validation,
+# and final implementation of any model in a production environment. McKinsey is not
+# liable for modifications made to Deliverables by anyone other than McKinsey
+# personnel, (ii) for use of any Deliverables in a live production environment or
+# (iii) for use of the Deliverables by third parties; or
+# (iv) the use of the Deliverables for a purpose other than the intended use
+# case covered by the agreement with the Client.
+# Client warrants that it will not use the Deliverables in a "closed-loop" system,
+# including where no Client employee or agent is materially involved in implementing
+# the Deliverables and/or insights derived from the Deliverables.
+import os
+import sys
+from pathlib import Path
+from typing import List
+
+from kedro.framework.cli import main
+
+
+def kedro_cli(args: List[str]) -> None:
+    sys.argv = ["kedro", *args]
+    sys.exit(main())
+
+
+# in regular jobs kedro_cli is invoked by the MLRun entrypoint
+# in Spark jobs, this file is executed by spark-submit
+# so we need to invoke kedro_cli manually
+if __name__ == "__main__":
+    # current working directory is an arbitrary one, not the kedro project's root
+    # (see the note in save_spark.py)
+    # so we change it back to the kedro project's root
+    os.chdir(Path(__file__).parents[1])
+    
+    # note that the arguments are hardcoded here
+    # this is because the MLRun entrypoint is not used and we cannot pass args
+    kedro_cli(["run", "-e", "local_mlrun"])

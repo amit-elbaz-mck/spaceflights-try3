@@ -1,0 +1,134 @@
+# (c) McKinsey & Company 2016 – Present
+# All rights reserved
+#
+#
+# This material is intended solely for your internal use and may not be reproduced,
+# disclosed or distributed without McKinsey & Company's express prior written consent.
+# Except as otherwise stated, the Deliverables are provided ‘as is’, without any express
+# or implied warranty, and McKinsey shall not be obligated to maintain, support, host,
+# update, or correct the Deliverables. Client guarantees that McKinsey’s use of
+# information provided by Client as authorised herein will not violate any law
+# or contractual right of a third party. Client is responsible for the operation
+# and security of its operating environment. Client is responsible for performing final
+# testing (including security testing and assessment) of the code, model validation,
+# and final implementation of any model in a production environment. McKinsey is not
+# liable for modifications made to Deliverables by anyone other than McKinsey
+# personnel, (ii) for use of any Deliverables in a live production environment or
+# (iii) for use of the Deliverables by third parties; or
+# (iv) the use of the Deliverables for a purpose other than the intended use
+# case covered by the agreement with the Client.
+# Client warrants that it will not use the Deliverables in a "closed-loop" system,
+# including where no Client employee or agent is materially involved in implementing
+# the Deliverables and/or insights derived from the Deliverables.
+import os
+import re
+from pathlib import Path
+
+import mlrun
+from git import InvalidGitRepositoryError, Repo
+from kedro.framework.startup import bootstrap_project
+from mlrun.projects import MlrunProject
+
+import sys
+sys.path.append(os.getcwd())
+from project_setup_extras import run_extras
+import logging
+from kedro.framework.startup import ProjectMetadata
+from kedro.framework.project import pipelines
+from kedro.framework.session import KedroSession
+
+
+logger = logging.getLogger(__name__)
+
+def setup(
+    project: mlrun.projects.MlrunProject,
+) -> mlrun.projects.MlrunProject:
+    """
+    Creating the project for the demo. This function is expected to call automatically when calling the function
+    `mlrun.get_or_create_project`.
+
+    :param project: The project to set up.
+
+    :returns: A fully prepared project for this demo.
+    """
+    # Set secrets:
+    _set_secrets(project=project)
+
+    # Set the project git source:
+    source = os.environ["MLRUN_SOURCE"]
+    if source:
+        print(f"Project Source: {source}")
+        project.set_source(source=source, pull_at_runtime=True, workdir='kedro')
+
+    # Log the initial workflow inputs
+    project = log_inputs(project)
+
+    # Set the functions:
+    handlers_fn = _set_functions(project=project)
+
+    # Set custom artifact path
+    project.artifact_path = os.environ["ARTIFACT_PATH"]
+
+    # Set the workflows:
+    project.set_workflow(name="main", workflow_path=".mlrun/workflow.py")
+
+    # Run extra configurations defined in the 'project_setup_extras.py' file
+    project, build_commands = run_extras(project, project.get_param("run_build"))
+
+    # Build the handler function
+    if project.get_param("run_build"):
+        project.build_function(handlers_fn, commands=build_commands, overwrite_build_params=True)
+
+    # Save and return the project:
+    project.save()
+    return project
+
+def _set_secrets(project: mlrun.projects.MlrunProject):
+    # Set as environment variables:
+    mlrun.set_env_from_file("../mlrun.env")
+
+    # Set the secrets:
+    project.set_secrets(file_path="../mlrun.env")
+    
+
+def log_inputs(project: mlrun.projects.MlrunProject, pipeline_name: str = "__default__", env: str = "local") -> mlrun.projects.MlrunProject:
+    """Log global free inputs."""
+    kedro_metadata = bootstrap_project(os.getcwd())
+    session = KedroSession.create(env=env)
+    catalog = session.load_context().catalog
+    global_free_inputs = pipelines[pipeline_name].inputs()    
+
+    for dataset in global_free_inputs:
+        if not dataset.startswith("params:") and dataset != "parameters":
+            if not hasattr(catalog._data_sets[dataset], "_filepath"):  # noqa: SLF001
+                logger.warning(
+                    "Not logging dataset `%s`. It does not have a _filepath attribute.",
+                    dataset,
+                )
+            fp = str(catalog._data_sets[dataset]._filepath)  # noqa: SLF001
+            # local_path in log_artifact() can actually be a local or remote URI.
+            #  If local, the file will be uploaded to the MLRun artifact store
+            # mlrun does not complain if the file to be uploaded does not exist, and
+            #   uploads a zero-byte file instead. so, we check the file ourselves
+            is_local = fp.startswith("/") or "://" not in fp
+            if is_local and not Path(fp).exists():
+                raise ValueError(f"Local input does not exist: {fp}")
+            project.log_artifact(dataset, local_path=fp)
+            # we also set the artifact in the project, so that it is logged in
+            # project.yaml
+            project.set_artifact(dataset, target_path=project.get_artifact(dataset).target_path)
+    return project
+
+
+
+def _set_functions(project: mlrun.projects.MlrunProject):
+    # Set the kedro_handler function
+    handlers_fn = project.set_function(
+        func=".mlrun/kedro_handler.py",
+        name="kedro-handler",
+        kind="job",
+        image="mlrun/mlrun:1.4.0",
+        with_repo=True,
+        requirements_file="src/requirements.txt"
+    )
+    return handlers_fn
