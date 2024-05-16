@@ -25,15 +25,15 @@ import re
 from pathlib import Path
 
 import mlrun
-from git import InvalidGitRepositoryError, Repo
+#from git import InvalidGitRepositoryError, Repo
 from kedro.framework.startup import bootstrap_project
-from mlrun.projects import MlrunProject
+#from mlrun.projects import MlrunProject
 
 import sys
 sys.path.append(os.getcwd())
 from project_setup_extras import run_extras
 import logging
-from kedro.framework.startup import ProjectMetadata
+#from kedro.framework.startup import ProjectMetadata
 from kedro.framework.project import pipelines
 from kedro.framework.session import KedroSession
 
@@ -51,17 +51,15 @@ def setup(
 
     :returns: A fully prepared project for this demo.
     """
+    workdir = "{{workdir}}"
+
     # Set secrets:
     _set_secrets(project=project)
 
-    # Set the project git source:
-    source = os.environ["MLRUN_SOURCE"]
-    if source:
-        print(f"Project Source: {source}")
-        project.set_source(source=source, pull_at_runtime=True, workdir='kedro')
-
     # Log the initial workflow inputs
-    project = log_inputs(project)
+    project = log_inputs(project, workdir=workdir)
+
+    os.chdir(f"./{workdir}")
 
     # Set the functions:
     handlers_fn = _set_functions(project=project)
@@ -70,7 +68,12 @@ def setup(
     project.artifact_path = os.environ["ARTIFACT_PATH"]
 
     # Set the workflows:
-    project.set_workflow(name="main", workflow_path=".mlrun/workflow.py")
+    project.set_workflow(name="main", workflow_path="./.mlrun/workflow.py")
+
+    # Set the project git source:
+    source = os.environ["MLRUN_SOURCE"]
+    if source:
+        project.set_source(source=source, pull_at_runtime=True, workdir=workdir)
 
     # Run extra configurations defined in the 'project_setup_extras.py' file
     project, build_commands = run_extras(project, project.get_param("run_build"))
@@ -84,17 +87,15 @@ def setup(
     return project
 
 def _set_secrets(project: mlrun.projects.MlrunProject):
-    # Set as environment variables:
-    mlrun.set_env_from_file("../mlrun.env")
 
     # Set the secrets:
-    project.set_secrets(file_path="../mlrun.env")
+    project.set_secrets(file_path=project.get_param("env-file"))
     
 
-def log_inputs(project: mlrun.projects.MlrunProject, pipeline_name: str = "__default__", env: str = "local") -> mlrun.projects.MlrunProject:
+def log_inputs(project: mlrun.projects.MlrunProject, pipeline_name: str = "__default__", env: str = "local", workdir:str = "kedro") -> mlrun.projects.MlrunProject:
     """Log global free inputs."""
-    kedro_metadata = bootstrap_project(os.getcwd())
-    session = KedroSession.create(env=env)
+    kedro_metadata = bootstrap_project(os.getcwd() + "/" + workdir)
+    session = KedroSession.create(env=env, project_path=f"./{workdir}")
     catalog = session.load_context().catalog
     global_free_inputs = pipelines[pipeline_name].inputs()    
 
@@ -124,11 +125,11 @@ def log_inputs(project: mlrun.projects.MlrunProject, pipeline_name: str = "__def
 def _set_functions(project: mlrun.projects.MlrunProject):
     # Set the kedro_handler function
     handlers_fn = project.set_function(
-        func=".mlrun/kedro_handler.py",
+        func="./.mlrun/kedro_handler.py",
         name="kedro-handler",
         kind="job",
-        image="mlrun/mlrun:1.4.0",
+        image="mlrun/mlrun:1.6.0",
         with_repo=True,
-        requirements_file="src/requirements.txt"
+        requirements_file="./src/requirements.txt"
     )
     return handlers_fn

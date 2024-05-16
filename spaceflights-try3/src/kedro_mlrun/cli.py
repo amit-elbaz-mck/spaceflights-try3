@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, get_origin, get_type_hints
+import os
 
 import click
 import dotenv
@@ -161,9 +162,8 @@ def mlrun_group() -> None:
 @mlrun_group.command()
 @click.option("-p", "--pipeline", "pipeline_name", default="__default__")
 @click.option("-e", "--env", "env", default="local")
-@click.option("-b", "--build", "build", default=False)
 @click.pass_obj
-def init(metadata: ProjectMetadata, pipeline_name: str, env: str, build: bool) -> None:
+def init(metadata: ProjectMetadata, pipeline_name: str, env: str) -> None:
     """Initialize MLRun features for this kedro project."""
     wf = MLRunNodeWorkflow(env=env, pipe=pipelines[pipeline_name])
     write_kedro_handler(metadata)
@@ -272,7 +272,9 @@ def log_inputs(metadata: ProjectMetadata, pipeline_name: str, env: str) -> None:
             project.log_artifact(dataset, local_path=fp)
             # we also set the artifact in the project, so that it is logged in
             # project.yaml
-            project.set_artifact(dataset, target_path=project.get_artifact(dataset).target_path)
+            project.set_artifact(
+                dataset, target_path=project.get_artifact(dataset).target_path
+            )
 
     project.save()
 
@@ -314,14 +316,17 @@ def write_save(metadata: ProjectMetadata) -> None:
 def write_project_setups(metadata: ProjectMetadata) -> None:
     (metadata.project_path / ".mlrun").mkdir(parents=True, exist_ok=True)
     project_setup_template = create_template(TEMPLATES_DIR / "project_setup.py.j2")
-    project_setup_template.stream(project_name=to_project_name(metadata.project_name)).dump(
-        str(metadata.project_path / "project_setup.py")
-    )
+    project_setup_template.stream(
+        project_name=to_project_name(metadata.project_name),
+        workdir=os.path.basename(os.getcwd())
+    ).dump(str(metadata.project_path.parent / "project_setup.py"))
 
-    project_setup_extras_template = create_template(TEMPLATES_DIR / "project_setup_extras.py.j2")
-    project_setup_extras_template.stream(project_name=to_project_name(metadata.project_name)).dump(
-        str(metadata.project_path / "project_setup_extras.py")
+    project_setup_extras_template = create_template(
+        TEMPLATES_DIR / "project_setup_extras.py.j2"
     )
+    project_setup_extras_template.stream(
+        project_name=to_project_name(metadata.project_name)
+    ).dump(str(metadata.project_path.parent / "project_setup_extras.py"))
 
 
 def write_runner(metadata: ProjectMetadata) -> None:

@@ -25,7 +25,7 @@ import logging
 import pickle
 from typing import Any, Dict, Optional
 
-from kedro.io.core import AbstractDataset
+from kedro.io.core import AbstractDataSet
 from mlrun.artifacts import get_model
 from mlrun.artifacts.base import Artifact
 from mlrun.package.context_handler import ContextHandler
@@ -80,7 +80,7 @@ def log_object_with_packagers(
     ctx_handler._context.log_artifact(item=arti, **logging_kwargs)
 
 
-class MLRunDataset(AbstractDataset):
+class MLRunDataset(AbstractDataSet):
     def __init__(
         self,
         artifact_id: str,
