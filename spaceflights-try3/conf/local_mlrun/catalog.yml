@@ -1,0 +1,37 @@
+X_test:
+  artifact_id: X_test
+  type: kedro_mlrun.MLRunDataset
+X_train:
+  artifact_id: X_train
+  type: kedro_mlrun.MLRunDataset
+companies:
+  artifact_id: companies
+  data_type: pandas.core.frame.DataFrame
+  type: kedro_mlrun.MLRunDataset
+model_input_table:
+  artifact_id: model_input_table
+  type: kedro_mlrun.MLRunDataset
+preprocessed_companies:
+  artifact_id: preprocessed_companies
+  type: kedro_mlrun.MLRunDataset
+preprocessed_shuttles:
+  artifact_id: preprocessed_shuttles
+  type: kedro_mlrun.MLRunDataset
+regressor:
+  artifact_id: regressor
+  data_type: sklearn.linear_model._base.LinearRegression
+  type: kedro_mlrun.MLRunModelDataset
+reviews:
+  artifact_id: reviews
+  data_type: pandas.core.frame.DataFrame
+  type: kedro_mlrun.MLRunDataset
+shuttles:
+  artifact_id: shuttles
+  data_type: pandas.core.frame.DataFrame
+  type: kedro_mlrun.MLRunDataset
+y_test:
+  artifact_id: y_test
+  type: kedro_mlrun.MLRunDataset
+y_train:
+  artifact_id: y_train
+  type: kedro_mlrun.MLRunDataset

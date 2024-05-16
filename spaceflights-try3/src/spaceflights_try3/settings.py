@@ -40,3 +40,16 @@ CONFIG_LOADER_CLASS = OmegaConfigLoader
 # Class that manages the Data Catalog.
 # from kedro.io import DataCatalog
 # DATA_CATALOG_CLASS = DataCatalog
+
+def add_mlrun_hook() -> None:
+    from kedro_mlrun import MLRunModelHooks
+
+    _other_hooks = tuple(
+        hook
+        for hook in globals().get("HOOKS", ())
+        if not isinstance(hook, MLRunModelHooks)
+    )
+    globals()["HOOKS"] = _other_hooks + (MLRunModelHooks(),)
+
+
+add_mlrun_hook()
